@@ -1,0 +1,1172 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Created by webhugo on 17-10-18.
+
+import os, platform, subprocess, time, datetime, sys
+import hashlib, json, cookielib, urllib2, urllib, re, getpass, random
+import HTMLParser
+import traceback
+html_parser = HTMLParser.HTMLParser()
+
+# ！全局变量
+EryaCookie = cookielib.CookieJar()  # 保存cookie
+BaiduCookie = cookielib.CookieJar()  # Baidu Cookie
+system = platform.system()
+queryBaiduCL = 15  # 检索答案的准答案个数上限
+queryBaiduPage = 5  # 检索答案的准答案页面上限
+
+global schoolId  # 学校ID
+global schoolName  # 学校名字
+global account
+global password
+global userId
+global opener
+global queryOpener
+global config
+
+webheaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36'
+}
+
+
+# ！回显Log
+def plog(msg):
+    if msg[:5] in 'ERROR':
+        time.sleep(10)
+    print '[' + datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') + ']' + '  ' + msg
+
+
+# ！排序
+def SortAns(tt):
+    dirr = 0
+    minn = tt[0]
+    for i in xrange(0, len(tt)):
+        if tt[i] < minn:
+            minn = tt[i]
+            dirr = i
+    return (dirr, minn)
+
+
+# ！获取当前UNIX时间
+def LocalTimeStamp():
+    t = time.mktime(datetime.datetime.now().timetuple()) * 1000
+    return str(long(t))
+
+
+# ! 关键参数ENC生成函数
+def NewEnc(clazzId, jobId, objectId, playTime, duration, clipTime):
+    global userId
+    salt = '[d_yHJ!$pdA~5]'
+    mm = hashlib.md5()
+    mm.update('[' + clazzId + ']' + '[' + userId + ']' + '[' + jobId + ']' + '[' + objectId + ']' + '[' + str(
+        playTime * 1000) + ']'
+              + salt + '[' + str(duration * 1000) + ']' + '[' + clipTime + ']')
+    # print clazzId, userId, jobId, objectId, playTime, duration, clipTime
+    # print mm.hexdigest()
+    return str(mm.hexdigest())
+
+
+# ! 获取某个字符串值的方法
+def SplitStr(inner, prev, next):
+    ans = []
+    while True:
+        off = inner.find(prev)
+        if off == -1:
+            break
+        off += len(prev)
+        end = inner.find(next, off)
+        ans.append(inner[off: end])
+        inner = inner[end:]
+
+    return ans
+
+
+class Erya(object):
+    def Init(self):
+        global opener
+        global queryOpener
+        global schoolId
+        global schoolName
+        global config
+        global account
+        global password
+        config = self.inputConfig()
+        account = config['account']
+        password = config['password']
+        schoolId = config['schoolId']
+        schoolName = config['schoolName'].encode('utf-8')
+
+        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(EryaCookie))
+        queryOpener = urllib2.build_opener(urllib2.HTTPCookieProcessor(BaiduCookie))
+        urllib2.install_opener(opener)
+
+    # ! 载入配置文件
+    def inputConfig(self):
+        try:
+            with open("config.json", 'r') as load_f:
+                config = json.loads(load_f.read())
+                return config
+        except:
+            return None
+
+    def outputConfig(self, config):
+        with open('config.json', 'w+') as load_f:
+            load_f.write(json.dumps(config))
+
+    def showHelp(self):
+        print "Usage: eryaLook [option]"
+        print "Options:"
+        print "-s             start watch video"
+        print "-h             help"
+
+    # ! 用户入口
+    def UserInterface(self):
+        args = sys.argv
+        while True:
+            try:
+                if args[1] == '-s':
+                    self.GoErya()
+                elif args[1] == '-e':
+                    exit()
+                else:
+                    exit()
+            except:
+                traceback.print_exc()
+                self.showHelp()
+                exit()
+
+    # ! 开始执行EryaKiller
+    def GoErya(self):
+        self.SwitchSchool()
+        self.Login(config['account'], config['password'])
+        self.EryaKiller()
+
+    def GetDuration(self, oid):
+        dur = ''
+        dtoken = ''
+        url = 'https://mooc1-2.chaoxing.com/ananas/status/' + oid + '?k=' + schoolId + '&_dc=' + LocalTimeStamp()
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetDuration(oid)
+        except:
+            return self.GetDuration(oid)
+
+        inner = resp.read()
+        # print inner
+        data = json.loads(inner)
+        if not data['duration'] is None:
+            dur = data['duration']
+            dtoken = data['dtoken']
+        return (dur, dtoken)
+
+    # ！尔雅观看主函数
+    def EryaKiller(self):
+        nowc = 0
+
+        while True:
+            # 获取当前需要看的章节
+            courses = self.GetCourse()
+            courseid, clazzid, enc, name = courses[nowc]
+            if enc in '':
+                plog('获取课程失败!')
+            else:
+                plog('获取课程 ' + name)
+
+            cid, cname = self.GetOrangeChapter(courseid, clazzid, enc)
+            if cid in '':
+                plog('当前课程没有需要完成的章节!')
+                if nowc < len(courses):
+                    nowc += 1
+                    continue
+                else:
+                    break
+            else:
+                plog('获取当前需要观看的章节 ' + cname)
+
+            utenc = self.GetUtenc(cid, courseid, clazzid, enc)
+            tabnum = self.GetTabNum(courseid, clazzid, cid)
+            # print utenc
+
+            # 初始化验证包需要的参数
+            oid, begin, jobId, isPassed, otherInfo, mid = self.GetObjectId(courseid, clazzid, cid, tabnum)
+
+            dur, dtoken = self.GetDuration(oid)
+
+            plog('开始观看【' + name + '-' + cname + '】')
+
+            problemId, pans, proTime = self.GetProblemForWatching(mid)
+            # print problemId, pans
+            proFlag = True
+            nowtime = int(begin) / 1000
+            if nowtime > proTime:
+                proFlag = False
+            self.PostJudgeRequest(dtoken, dur, oid, clazzid, otherInfo, jobId, 0)
+            while True:
+                if nowtime >= dur:
+                    self.PostJudgeRequest(dtoken, dur, oid, clazzid, otherInfo, jobId, dur)
+                    if self.PostEndRequest(dtoken, dur, oid, clazzid, otherInfo, jobId, dur):
+                        break
+
+                if nowtime >= proTime and proFlag:
+                    time.sleep(5)
+                    self.PostAnswerForWProblem(problemId, pans)
+                    nowtime = proTime
+                    proFlag = False
+                    self.PostJudgeRequest(dtoken, dur, oid, clazzid, otherInfo, jobId, nowtime)
+                    plog('【' + name + '-' + cname + '-' + str(nowtime) + 'S】' + '已回答视频弹出问题')
+                    nowtime += 180
+                    time.sleep(180)
+                    continue
+
+                if self.PostJudgeRequest(dtoken, dur, oid, clazzid, otherInfo, jobId, nowtime):
+                    break
+                plog('正在观看【' + name + '-' + cname + '-' + str(nowtime) + 'S】')
+                time.sleep(180)
+                nowtime += 180
+
+            plog('完成观看【' + name + '-' + cname + '】')
+
+            # 开始完成课后作业
+            # 获取作业相关参数
+            # jobId, workId, enc = self.GetWorKArg(clazzid, courseid, cid, tabnum)
+            # plog('获取【' + name + '-' + cname + '】课后作业相关参数！')
+
+            # 获取作业题目
+            # total, workrid, token, problem, html = self.GetTestProblem(cid, clazzid, courseid, jobId, workId, utenc,
+            #                                                            enc)
+            # plog('获取【' + name + '-' + cname + '】课后作业！')
+
+            # 完成作业（百度文库大法，太长的问题走随机数
+            # problem = self.FinishTestWorkByBaidu(problem, html)
+            # time.sleep(5)
+            # 提交作业答案
+            # if self.PostTestAnswer(clazzid, courseid, token, total, cid, workId, jobId, workrid, problem):
+            #     plog('提交【' + name + '-' + cname + '】课后作业成功！')
+            #
+            # time.sleep(5)
+            # score = self.GetScoreArg(cid, clazzid, courseid, jobId, workId, utenc, enc)
+            # plog('【' + name + '-' + cname + '】课后作业的成绩是:' + score)
+
+    # ！获取课后作业的成绩的相关参数
+    def GetScoreArg(self, cid, clazzid, courseid, jobid, workid, utenc, enc):
+        url = 'https://mooc1-2.chaoxing.com/api/work?api=1&workId=' + workid
+        url += '&jobid=' + jobid
+        url += '&needRedirect=true'
+        url += '&knowledgeid=' + cid
+        url += '&ut=s'
+        url += '&clazzId=' + clazzid
+        url += '&type='
+        url += '&enc=' + enc
+        url += '&utenc=' + utenc
+        url += '&courseid=' + courseid
+
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetScoreArg(cid, clazzid, courseid, jobid, workid, utenc, enc)
+        except:
+            return self.GetScoreArg(cid, clazzid, courseid, jobid, workid, utenc, enc)
+
+        inner = resp.read()
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+
+        score = SplitStr(inner, '成绩：<spanstyle="color:#db2727;">', '<')
+        return score[0]
+
+    # ! 提交课后作业的答案
+    def PostTestAnswer(self, clazzid, courseid, token, total, cid, workid, jobid, workrid, problem):
+        url = 'https://mooc1-2.chaoxing.com/work/addStudentWorkNewWeb?_classId=' + clazzid + '&courseid=' + courseid + '&token=' + token
+        postdata = {
+            'pyFlag': '',
+            'courseId': courseid,
+            'classId': clazzid,
+            'api': '1',
+            'workAnswerId': '',
+            'totalQuestionNum': total,
+            'fullScore': '100.0',
+            'knowledgeid': cid,
+            'oldSchoolId': '',
+            'oldWorkId': workid,
+            'jobid': jobid,
+            'workRelationId': workrid,
+            'enc': '',
+            'enc_work': token
+        }
+
+        for i in xrange(0, len(problem['type'])):
+            postdata['answer' + problem['id'][i]] = problem['answer'][i]
+            postdata['answertype' + problem['id'][i]] = str(problem['type'][i])
+        postdata['answerwqbid'] = ','.join(problem['id'])
+        postdata = urllib.urlencode(postdata)
+        print postdata
+        print url
+        req = urllib2.Request(url, postdata, webheaders)
+        try:
+            resp = urllib2.urlopen(req)
+        except Exception, e:
+            traceback.print_exc()
+            return self.PostTestAnswer(clazzid, courseid, token, total, cid, workid, jobid, workrid, problem)
+
+        return resp.code == 200
+
+    # ! 完成课后作业（PP考试网大法
+    def FinishTestWorkByPPK(self, problem, html):
+        time.sleep(5)
+
+        # print "==================="
+        url = 'http://s.ppkao.com/cse/search?q=' + urllib.quote(problem) + '&click=1&s=7348154799869824824&nsid='
+
+        req = urllib2.Request(url=url, headers=webheaders)
+        # print url
+        try:
+            resp = urllib2.urlopen(req)
+        except Exception, e:
+            print Exception,e
+            traceback.print_exc()
+            return self.FinishTestWorkByPPK(problem, html)
+
+
+        inner = resp.read()
+
+        problem = problem.replace('，', '')
+        problem = problem.replace('（', '')
+        problem = problem.replace('）', '')
+        problem = problem.replace('。', '')
+        problem = problem.replace('、', '')
+        problem = problem.replace(' ', '')
+
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+        inner = inner.replace('，', '')
+        inner = inner.replace('（', '')
+        inner = inner.replace('）', '')
+        inner = inner.replace('。', '')
+        inner = inner.replace(',', '')
+        inner = inner.replace('(', '')
+        inner = inner.replace(')', '')
+        inner = inner.replace('、', '')
+        inner = inner.replace('<em>', '')
+        inner = inner.replace('</em>', '')
+        inner = inner.replace(' ', '')
+
+        title = SplitStr(inner, 'c-title', '</h3>')
+        try:
+            title = title[0]
+            on = SplitStr(title, 'href="', '"')
+            print on[0]
+            req = urllib2.Request(url=on[0], headers=webheaders)
+
+            try:
+                resp = urllib2.urlopen(req)
+            except Exception, e:
+                print Exception,e
+                traceback.print_exc()
+                return self.FinishTestWorkByPPK(problem, html)
+
+            try:
+                inner = resp.read().decode('gb2312').encode('utf-8')
+            except Exception, e:
+                traceback.print_exc()
+                print Exception,e
+                print resp.read()
+                print "==========================="
+                print resp.read().decode('gb2312')
+                exit()
+            inner = SplitStr(inner, "ViewAnswers('", "'")[0]
+            # print inner
+            if inner.startswith("//"):
+                inner  = "http:"+inner
+            # print inner
+            req = urllib2.Request(url=inner, headers=webheaders)
+            try:
+                resp = urllib2.urlopen(req)
+            except Exception, e:
+                traceback.print_exc()
+                print Exception,e
+                return self.FinishTestWorkByPPK(problem, html)
+
+            try:
+                inner = resp.read().decode('gb2312').encode('utf-8')
+            except Exception, e:
+                print Exception,e
+                print resp.read()
+                print "==========================="
+                print resp.read().decode('gb2312')
+                exit()
+
+            inner = inner.replace('\n', '')
+            inner = inner.replace('\r', '')
+            inner = inner.replace(' ', '')
+            inner = inner.replace('\t', '')
+            inner = inner.replace('，', '')
+            inner = inner.replace('（', '')
+            inner = inner.replace('）', '')
+            inner = inner.replace('。', '')
+            inner = inner.replace(',', '')
+            inner = inner.replace('(', '')
+            inner = inner.replace(')', '')
+            inner = inner.replace('、', '')
+            inner = inner.replace('<em>', '')
+            inner = inner.replace('</em>', '')
+            inner = inner.replace(' ', '')
+
+            options = SplitStr(inner, "</strong>", "</div>")[0].strip()
+            ppkAnswer = SplitStr(inner, "参考答案：", "<")[0].strip()
+            # print "options"
+            # print options
+            # print "ppkAnswer"
+            # print ppkAnswer
+            answerText = SplitStr(options, ppkAnswer, "<")[0].strip()
+            # print "answerText"
+            # print answerText
+            # print SplitStr(hhh, '<label>', h)[0]
+            inner = html
+            inner = inner.replace('\n', '')
+            inner = inner.replace('\r', '')
+            inner = inner.replace(' ', '')
+            inner = inner.replace('\t', '')
+            inner = inner.replace('，', '')
+            inner = inner.replace('（', '')
+            inner = inner.replace('）', '')
+            inner = inner.replace('。', '')
+            inner = inner.replace(',', '')
+            inner = inner.replace('(', '')
+            inner = inner.replace(')', '')
+            inner = inner.replace('、', '')
+            inner = inner.replace('<em>', '')
+            inner = inner.replace('</em>', '')
+            inner = inner.replace(' ', '')
+            answerText = html_parser.unescape(answerText.decode("utf-8")).encode("utf-8")
+            index = inner.find(answerText)
+            answerTextExa = inner[index - 100:index + 10]
+            answer = SplitStr(answerTextExa, 'value="', '"')[0]
+            # print "answer"
+            # print answer
+            return answer
+        except:
+            return ""
+
+    # ! 随机生成答案算法
+    def RandomAns(self, type):
+        plog('随机生成答案中!')
+        if type == 0 or type == 1:
+            t = random.randint(0, 3)
+            return chr(ord('A') + t)
+        elif type == 3:
+            t = random.randint(0, 1)
+            if t == 0:
+                return 'false'
+            else:
+                return 'true'
+
+    # ! 完成课后作业（检索百度方法
+    def FinishTestWorkByBaidu(self, problem, html):
+        # print "===================1"
+
+        headers = dict.copy(webheaders)
+        ret = []
+
+        # 初始化报头
+        headers['Host'] = 'wenku.baidu.com'
+
+        for i in xrange(0, len(problem['type'])):
+            print problem['type']
+            print i
+            # 判断题不做
+            if problem['type'][i] != 3:
+                ans = self.FinishTestWorkByPPK(problem['text'][i], html)
+                plog('正在检索PPK考试网!')
+                if not ans in '':
+                    print '获取答案成功w(ﾟДﾟ)w： ' + ans
+                    ret.append(ans)
+                    continue
+                else:
+                    print "没有检索到答案凸(艹皿艹 )"
+            # print "===================2 "
+
+            try:
+                ans = self.QueryCore("", problem['text'][i], problem['type'][i])
+                # 获取判断题答案
+                if ans in '':
+                    ans = self.RandomAns(problem['type'][i])
+                ret.append(ans)
+            except Exception,e:
+                traceback.print_exc()
+
+        print "作业全部答案： "
+        print ret
+        problem['answer'] = ret
+
+        return problem
+
+    # ! 检索算法
+    def QueryCore(self, inner, problem, type):
+        if not (type == 0 or type == 3):
+            return ''
+
+        a = 0
+        b = 0
+        c = 0
+        d = 0
+        tr = 0
+        fa = 0
+
+        problemFound = False
+        keywordFound = False
+
+        problem = problem.replace('，', '')
+        problem = problem.replace('（', '')
+        problem = problem.replace('）', '')
+        problem = problem.replace('。', '')
+        problem = problem.replace('、', '')
+        problem = problem.replace(' ', '')
+
+        inner = inner.replace('，', '')
+        inner = inner.replace('（', '')
+        inner = inner.replace('）', '')
+        inner = inner.replace('。', '')
+        inner = inner.replace(',', '')
+        inner = inner.replace('(', '')
+        inner = inner.replace(')', '')
+        inner = inner.replace('、', '')
+        inner = inner.replace('<em>', '')
+        inner = inner.replace('</em>', '')
+        inner = inner.replace(' ', '')
+
+        keyword = '正确答案'
+        title = 'spantitle="'
+        answord = [['A', 'B', 'C', 'D'], [], [], ['√', '×']];
+        answord = answord[type]
+
+        off = inner.find(title)
+        inner = inner[off + len(title):]
+
+        while True:
+            tt = []
+            pdir = inner.find(problem)
+            kdir = inner.find(keyword)
+            tdir = inner.find(title)
+            for t in answord:
+                tt.append(inner.find(t))
+
+            if (not problemFound) and pdir != -1:
+                if kdir != -1 and kdir < pdir:
+                    inner = inner[kdir + len(keyword):]
+                    continue
+
+                inner = inner[pdir + len(problem):]
+                problemFound = True
+                continue
+
+            if (not keywordFound) and kdir != -1:
+                if tdir != -1 and kdir > tdir:
+                    problemFound = False
+                    inner = inner[tdir + len(title):]
+                    continue
+
+                keywordFound = True
+                inner = inner[kdir + len(keyword):]
+                continue
+
+            mt, mtdir = SortAns(tt)
+            if tdir != -1 and mtdir > tdir:
+                problemFound = False
+                keywordFound = False
+                inner = inner[tdir + len(title):]
+                continue
+
+            if mtdir != -1 and keywordFound and problemFound:
+                if type == 0:
+                    if mt == 0:
+                        a += 1
+                    elif mt == 1:
+                        b += 1
+                    elif mt == 2:
+                        c += 1
+                    elif mt == 3:
+                        d += 1
+                elif type == 3:
+                    if mt == 0:
+                        tr += 1
+                    elif mt == 1:
+                        fa += 1
+                keywordFound = False
+                problemFound = False
+                inner = inner[mtdir + len(answord[mt]):]
+                continue
+
+            break
+
+        # print fa, tr
+
+        if type == 0:
+            if a > b and a > c and a > d:
+                return 'A'
+            if b > a and b > c and b > d:
+                return 'B'
+            if c > a and c > b and c > d:
+                return 'C'
+            if d > a and d > b and d > c:
+                return 'D'
+            return ''
+        elif type == 3:
+            if fa > tr:
+                return 'false'
+            if tr > fa:
+                return 'true'
+            return ''
+
+    # ! 获取课后作业的题号以及题型
+    def GetTestProblem(self, cid, clazzid, courseid, jobid, workid, utenc, enc):
+        url = 'https://mooc1-2.chaoxing.com/api/work?api=1&workId=' + str(workid)
+        url += '&jobid=' + jobid
+        url += '&needRedirect=true'
+        url += '&knowledgeid=' + cid
+        url += '&ut=s'
+        url += '&clazzId=' + clazzid
+        url += '&type='
+        url += '&enc=' + enc
+        url += '&utenc=' + utenc
+        url += '&courseid=' + courseid
+
+        total = ''
+        workrid = ''
+        token = ''
+        problemId = ''
+        problemType = []
+        problemText = []
+
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        # print url
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetTestProblem(cid, clazzid, courseid, jobid, workid, utenc, enc)
+        except:
+            return self.GetTestProblem(cid, clazzid, courseid, jobid, workid, utenc, enc)
+
+        inner = resp.read()
+        html = inner
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+
+        total = SplitStr(inner, 'totalQuestionNum"value="', '"')
+        workrid = SplitStr(inner, 'workRelationId"value="', '"')
+        token = SplitStr(inner, 'enc_work"value="', '"')
+
+        problemId = SplitStr(inner, 'a="', '"')
+        problemId = problemId[0].split(',')
+
+        for p in problemId:
+            if p != '':
+                t = SplitStr(inner, 'name="answertype' + p + '"value="', '"')
+                problemType.append(int(t[0]))
+
+        problemText = SplitStr(inner, '】', '<')
+        problem = {'id': problemId, 'type': problemType, 'text': problemText}
+        return (total[0], workrid[0], token[0], problem, html)
+
+    # ! 获取课后作业的相关参数
+    def GetWorKArg(self, clazzid, courseid, cid, tabnum):
+        url = 'https://mooc1-2.chaoxing.com/knowledge/cards?clazzid=' + clazzid + '&courseid=' + courseid + '&knowledgeid=' + cid + '&num=' + str(
+            tabnum - 1) + '&v=20160407-1'
+        # print url
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        jobid = ''
+        workid = ''
+        enc = ''
+
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetWorKArg(clazzid, courseid, cid, tabnum)
+        except:
+            return self.GetWorKArg(clazzid, courseid, cid, tabnum)
+
+        inner = resp.read()
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+
+        argJson = SplitStr(inner, 'mArg=', ';')
+        args = json.loads(argJson[1])
+        jobid = args['attachments'][0]['jobid']
+        workid = args['attachments'][0]['property']['workid']
+        enc = args['attachments'][0]['enc']
+
+        if not 'work-' + str(workid) in jobid:
+            workid = jobid[5:]
+
+        return (jobid, workid, enc)
+
+    # ! 发送看视频时问题答案
+    def PostAnswerForWProblem(self, problemId, answer):
+        url = 'https://mooc1-2.chaoxing.com/richvideo/qv?resourceid=' + problemId + '&answer=' + '\'' + answer + '\''
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            self.PostAnswerForWProblem(problemId, answer)
+        except:
+            self.PostAnswerForWProblem(problemId, answer)
+
+    # ! 每一课时的结束包
+    def PostEndRequest(self, dtoken, duration, objectid, clazzid, otherinfo, jobid, playtime):
+        global userId
+        url = 'https://mooc1-2.chaoxing.com/multimedia/log/' + dtoken
+        url += '?duration=' + str(duration)
+        url += '&objectId=' + objectid
+        url += '&clazzId=' + clazzid
+        url += '&clipTime=' + '0_' + str(duration)
+        url += '&otherInfo=' + otherinfo
+        url += '&dtype=Video'
+        url += '&userid=' + userId
+        url += '&rt=0.9'
+        url += '&jobid=' + jobid
+        url += '&view=pc'
+        url += '&playingTime=' + str(playtime)
+        url += '&isdrag=4'
+        url += '&enc=' + NewEnc(clazzid, jobid, objectid, playtime, duration, '0_' + str(duration))
+        # print url
+
+        headers = webheaders
+        headers['Host'] = 'mooc1-2.chaoxing.com'
+        headers['Referer'] = 'https://mooc1-2.chaoxing.com/ananas/modules/video/index.html?v=20150402'
+        req = urllib2.Request(
+            url=url,
+            headers=headers
+        )
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.PostEndRequest(dtoken, duration, objectid, clazzid, otherinfo, jobid, playtime)
+        except:
+            return self.PostEndRequest(dtoken, duration, objectid, clazzid, otherinfo, jobid, playtime)
+
+        ans = json.loads(resp.read())
+        return ans['isPassed']
+
+    # ! 校验时长用的请求（不允许大幅度跳时，服务端有做检测
+    def PostJudgeRequest(self, dtoken, duration, objectid, clazzid, otherinfo, jobid, playtime):
+        global userId
+        url = 'https://mooc1-2.chaoxing.com/multimedia/log/' + dtoken
+        url += '?duration=' + str(duration)
+        url += '&objectId=' + objectid
+        url += '&clazzId=' + clazzid
+        url += '&clipTime=' + '0_' + str(duration)
+        url += '&otherInfo=' + otherinfo
+        url += '&dtype=Video'
+        url += '&userid=' + userId
+        url += '&rt=0.9'
+        url += '&jobid=' + jobid
+        url += '&view=pc'
+        url += '&playingTime=' + str(playtime)
+        url += '&isdrag=3'
+        url += '&enc=' + NewEnc(clazzid, jobid, objectid, playtime, duration, '0_' + str(duration))
+        # print url
+
+        headers = dict.copy(webheaders)
+        headers['Host'] = 'mooc1-2.chaoxing.com'
+        headers['Referer'] = 'https://mooc1-2.chaoxing.com/ananas/modules/video/index.html?v=20150402'
+        req = urllib2.Request(
+            url=url,
+            headers=headers
+        )
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.PostJudgeRequest(dtoken, duration, objectid, clazzid, otherinfo, jobid, playtime)
+        except:
+            return self.PostJudgeRequest(dtoken, duration, objectid, clazzid, otherinfo, jobid, playtime)
+
+        ans = json.loads(resp.read())
+        return ans['isPassed']
+
+    # ! 获取视频的ObjectId
+    def GetObjectId(self, courseid, clazzid, cid, tabnum):
+        url = 'https://mooc1-2.chaoxing.com/knowledge/cards?clazzid=' + clazzid + '&courseid=' + courseid + '&knowledgeid=' + cid + '&num=' + str(
+            tabnum - 2) + '&v=20160407-1'
+        matchOid = re.compile(r'''.*data="{&quot;objectid&quot;:&quot;(?P<oid>.*)&quot;,&quot;name''')
+        matchCInf = re.compile(r'''.*mArg=(?P<inf>.*);}catch''')
+        # matchMid = re.compile(r'''.*"mid":"(?P<mid>.*)","type":".mp4"''')
+        oid = ''
+        begin = 0
+        jobId = ''
+        isPassed = False
+        otherInfo = ''
+        mid = ''
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetObjectId(courseid, clazzid, cid, tabnum)
+        except:
+            return self.GetObjectId(courseid, clazzid, cid, tabnum)
+
+        inner = resp.read()
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+        m = matchOid.match(inner)
+        if not m is None:
+            oid = m.group('oid')
+        # print 'xxxxx'
+        m = matchCInf.match(inner)
+        if not m is None:
+            data = json.loads(m.group('inf'))
+        if data['attachments'][0].has_key('headOffset'):
+            begin = data['attachments'][0]['headOffset']
+        if data['attachments'][0].has_key('jobid'):
+            jobId = data['attachments'][0]['jobid']
+        if data['attachments'][0].has_key('otherInfo'):
+            otherInfo = data['attachments'][0]['otherInfo']
+        if data['attachments'][0].has_key('isPassed'):
+            isPassed = data['attachments'][0]['isPassed']
+        if data['attachments'][0].has_key('mid'):
+            mid = data['attachments'][0]['mid']
+        if data['attachments'][0].has_key('objectid'):
+            oid = data['attachments'][0]['objectid']
+
+        return (oid, begin, jobId, isPassed, otherInfo, mid)
+
+    # ! 获取看视频时问题
+    def GetProblemForWatching(self, mid):
+        url = 'https://mooc1-2.chaoxing.com/richvideo/initdatawithviewer?&start=undefined&mid=' + mid
+        problemId = ''
+        answer = ''
+        proTime = 0
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetProblemForWatching(mid)
+        except:
+            return self.GetProblemForWatching(mid)
+
+        ans = json.loads(resp.read())
+        problemId = str(ans[0]['datas'][0]['resourceId'])
+        if ans[0]['datas'][0]['options'][0]['isRight']:
+            answer = 'A'
+        else:
+            answer = 'B'
+        proTime = ans[0]['datas'][0]['startTime']
+        return (problemId, answer, proTime)
+
+    # ! 获取TabNum
+    def GetTabNum(self, courseid, clazzid, cid):
+        url = 'https://mooc1-2.chaoxing.com/mycourse/studentstudyAjax'
+        postdata = {
+            'courseId': courseid,
+            'clazzid': clazzid,
+            'chapterId': cid
+        }
+        tabnum = 0
+        postdata = urllib.urlencode(postdata)
+        req = urllib2.Request(url, postdata, webheaders)
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetTabNum(courseid, clazzid, cid)
+        except:
+            return self.GetTabNum(courseid, clazzid, cid)
+
+        inner = resp.read()
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+        tabnum = SplitStr(inner, 'PCount.previous(\'', '\'')
+
+        return int(tabnum[0])
+
+    # ! 获取课后作业关键参数utenc
+    def GetUtenc(self, cid, courseid, clazzid, enc):
+        url = 'https://mooc1-2.chaoxing.com/mycourse/studentstudy?chapterId=' + cid + '&courseId=' + courseid + '&clazzid=' + clazzid + '&enc=' + enc
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetUtenc(cid, courseid, clazzid, enc)
+        except:
+            return self.GetUtenc(cid, courseid, clazzid, enc)
+
+        inner = resp.read()
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+
+        utenc = SplitStr(inner, 'utEnc="', '"')
+        return utenc[0]
+
+    # ! 获取课程章节列表，判断当前需要观看的章节
+    def GetOrangeChapter(self, courseid, clazzid, enc):
+        url = 'https://mooc1-2.chaoxing.com/mycourse/studentcourse?courseId=' + courseid + '&clazzid=' + clazzid + '&enc=' + enc
+        matchChapter = re.compile(
+            r'''<emclass="orange">\d</em></span><spanclass="articlename"><ahref='/mycourse/studentstudy\?chapterId=(?P<cid>[0-9]+)&courseId=\d+&clazzid=\d+&enc=[a-zA-Z0-9]+'title="(?P<cname>[^x00-xff]+)">(?P=cname)</a></span></h3>''')
+        cid = ''
+        cname = ''
+        req = urllib2.Request(
+            url=url,
+            headers=webheaders
+        )
+        try:
+            resq = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetOrangeChapter(courseid, clazzid, enc)
+        except:
+            return self.GetOrangeChapter(courseid, clazzid, enc)
+        inner = resq.read()
+        inner = inner.replace('\n', '')
+        inner = inner.replace('\r', '')
+        inner = inner.replace(' ', '')
+        inner = inner.replace('\t', '')
+        m = matchChapter.search(inner)
+        if not m is None:
+            cid = m.group('cid')
+            cname = m.group('cname')
+        # print cid, cname
+        return (cid, cname)
+
+    # ！获取课程
+    def GetCourse(self):
+        enc = ''
+        courseId = ''
+        clazzid = ''
+        name = ''
+        courses = []
+        url = 'http://mooc1-2.chaoxing.com/visit/courses'
+        matchCourse = re.compile(
+            r'''studentcourse\?courseId=(?P<courseid>\d+)&clazzid=(?P<clazzid>\d+)&enc=(?P<enc>\w+)'target="_blank"title="(?P<name>\W+)">(?P=name)''')
+        try:
+            req = urllib2.Request(
+                url=url,
+                headers=webheaders
+            )
+            resq = urllib2.urlopen(req)
+            inner = resq.read()
+            inner = inner.replace('\n', '')
+            inner = inner.replace('\r', '')
+            inner = inner.replace(' ', '')
+            inner = inner.replace('\t', '')
+            m = matchCourse.findall(inner)
+            courses = m
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetCourse()
+        except:
+            return self.GetCourse()
+
+        # print courses
+        # print courseId,clazzid,enc
+        return courses
+
+    # ! 登录
+    def Login(self, account, password):
+        global userId
+        matchError = re.compile(r'.*show_error">(?P<error>.*)&nbsp;</td><td>&nbsp;</td>', re.I | re.M)
+
+        # 获取验证码
+        numcode = self.GetNumCode()
+        print account
+        print password
+        print numcode
+        resp = self.PostLoginRequest(account, password, numcode)
+
+        if resp.code == 200:
+            inner = resp.read()
+            inner = inner.replace('\n', '')
+            inner = inner.replace('\r', '')
+            inner = inner.replace(' ', '')
+            inner = inner.replace('\t', '')
+            m = matchError.match(inner)
+
+            if not m is None:
+                plog(m.group('error'))
+                return self.Login(account, password)
+            else:
+                plog('登录成功!')
+                for item in EryaCookie:
+
+                    if item.name in 'UID':
+                        userId = item.value
+
+                        break
+        elif resp.code == 302:
+            plog('登录成功!')
+        return 0
+
+    # ! 发送登录请求
+    def PostLoginRequest(self, account, password, numcode):
+        global schoolId
+        global schoolName
+        posturl = 'https://passport2.chaoxing.com/login?refer=http%3A%2F%2Fi.mooc.chaoxing.com'
+        postdata = {
+            'refer_0x001': 'http%3A%2F%2Fi.mooc.chaoxing.com',
+            'pid': '-1',
+            'pidName': '',
+            'fid': schoolId,
+            'fidName': schoolName,
+            'allowJoin': '0',
+            'isCheckNumCode': '1',
+            'f': '0',
+            'productid': '',
+            'uname': account,
+            'password': password,
+            'numcode': numcode,
+            'verCode': ''
+        }
+
+        postdata = urllib.urlencode(postdata)
+        req = urllib2.Request(posturl, postdata, webheaders)
+        try:
+            ans = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+
+            plog('ERROR' + str(e.reason))
+            return self.PostLoginRequest(account, password, numcode)
+        except:
+            return self.PostLoginRequest(account, password, numcode)
+        return ans
+
+    # ！验证码
+    def GetNumCode(self):
+        url = "https://passport2.chaoxing.com/num/code?" + LocalTimeStamp()
+        try:
+            resq = urllib2.urlopen(url)
+        except urllib2.URLError, e:
+            plog('ERROR' + str(e.reason))
+            return self.GetNumCode()
+        except:
+            return self.GetNumCode()
+
+        f = file('verImg.png', 'wb')
+        f.write(resq.read())
+        f.close()
+        print "验证码请查看当前文件夹的 verImg.png"
+        numCode = raw_input('请输入验证码(输入0,刷新验证码)-> ')
+        while True:
+            if numCode.isdigit():
+                numCode = int(numCode)
+                if numCode == 0:
+                    return self.GetNumCode()
+                return numCode
+
+            print "输入无效"
+            numCode = raw_input('请输入验证码(输入0,刷新验证码)-> ')
+
+    # ! 学校选择器
+    def SwitchSchool(self):
+        global schoolId
+        global schoolName
+        if schoolId.strip() not in "":
+            return
+
+        school = raw_input('请输入学校---> ')
+        schools = self.QuerySchool(school)
+
+        if not schools['result']:
+            print '查无此校!'
+            return self.SwitchSchool()
+
+        i = 1
+        print "0. 重新输入"
+        for s in schools['froms']:
+            print str(i) + '. ' + s['name']
+            i += 1
+
+        while True:
+            sid = raw_input('选择学校-->')
+            if sid.isdigit():
+                sid = int(sid)
+                # print sid
+                if sid == 0:
+                    return self.SwitchSchool()
+                if sid < schools['fromNums']:
+                    plog('已选择学校为' + schools['froms'][sid - 1]['name'].encode('utf-8'))
+                    schoolId = str(schools['froms'][sid - 1]['id'])
+                    schoolName = schools['froms'][sid - 1]['name'].encode('utf-8')
+                    iconfig = self.inputConfig()
+                    iconfig['schoolId'] = schoolId
+                    iconfig['schoolName'] = schoolName
+                    self.outputConfig(iconfig)
+                    break
+            print '无效输入!'
+
+    def QuerySchool(self, School):
+        url = 'https://passport2.chaoxing.com/org/searchforms'
+        postdata = {
+            'allowjoin': '0',
+            'filter': School,
+            'pid': '-1'
+        }
+        postdata = urllib.urlencode(postdata)
+        req = urllib2.Request(url=url, data=postdata, headers=webheaders)
+        try:
+            resp = urllib2.urlopen(req)
+        except urllib2.URLError, e:
+            plog('ERROR' + e.reason)
+            return self.QuerySchool(School)
+        except:
+            return self.QuerySchool(School)
+
+        return json.loads(resp.read())
+
+
+# ！脚本入口函数
+if __name__ == "__main__":
+    erya = Erya()
+    erya.Init()
+    while True:
+        erya.UserInterface()
