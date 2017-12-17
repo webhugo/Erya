@@ -6,8 +6,8 @@
 
 
 ![效果图](web.png)
-![观看效果1](result1.png)
-![观看效果2](result2.png)
+![观看效果1](result1.jpg)
+![观看效果2](result2.jpg)
 
 ##　使用方法 (环境python2)
 1. 在config.json中写你的账号和密码
