@@ -5,11 +5,7 @@
 - 可以自己先把题做完，自动解锁，然后自动观看(至少本人是这样做的)
 
 
-![效果图](web.png)
-![观看效果1](result1.jpg)
-![观看效果2](result2.jpg)
-
-##　使用方法 (环境python2)
+## 使用方法(环境python2)
 1. 在config.json中写你的账号和密码
 
 2. 开始运行脚步 
@@ -17,6 +13,10 @@
 python eryaLook -s 或者 eryaLook -s
 ```
 3. 输入提取码，请看verImg.png
+
+ <img src="./web.png" width = "300" height = "300" alt="图片名称" align=center />
+ <img src="./result1.jpg" width = "300" height = "150" alt="图片名称" align=center />
+ <img src="./result2.jpg" width = "300" height = "150" alt="图片名称" align=center />
 
 
 
