@@ -14,10 +14,10 @@ python eryaLook -s 或者 eryaLook -s
 ```
 3. 输入提取码，请看verImg.png
 
- <img src="./web.png" width = "300" height = "300" alt="图片名称" align=center />
- <img src="./result1.jpg" width = "300" height = "150" alt="图片名称" align=center />
- <img src="./result2.jpg" width = "300" height = "150" alt="图片名称" align=center />
 
+![效果图](web.png)
+![观看效果1](result1.jpg)
+![观看效果2](result2.jpg)
 
 
 ## 致谢
